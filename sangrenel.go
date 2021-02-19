@@ -40,6 +40,9 @@ type config struct {
 	tlsCertificate        string
 	tlsPrivateKey         string
 	tlsInsecureSkipVerify bool
+	saslMechanism         string
+	saslUsername          string
+	saslPassword          string
 }
 
 var (
@@ -96,6 +99,9 @@ func init() {
 	flag.StringVar(&Config.tlsCertificate, "tls-cert-file", "", "Path to the certificate file")
 	flag.StringVar(&Config.tlsPrivateKey, "tls-key-file", "", "Path to the private key file")
 	flag.BoolVar(&Config.tlsInsecureSkipVerify, "tls-insecure-skip-verify", false, "TLS insecure skip verify")
+	flag.StringVar(&Config.saslMechanism, "sasl-mechanism", "", "SASL Mechanism to use: cram-sha256, cram-sha512")
+	flag.StringVar(&Config.saslUsername, "sasl-username", "", "SASL Username")
+	flag.StringVar(&Config.saslPassword, "sasl-password", "", "SASL Password")
 	flag.Parse()
 
 	Config.brokers = strings.Split(*brokerString, ",")
@@ -278,6 +284,23 @@ func worker(n int, t *tachymeter.Tachymeter) {
 
 			conf.Net.TLS.Enable = true
 			conf.Net.TLS.Config = tlsConfig
+		}
+
+		if Config.saslMechanism != "" {
+			conf.Net.SASL.Enable = true
+			conf.Net.SASL.Handshake = true
+			if Config.saslMechanism == "cram-sha512" {
+				conf.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA512} }
+				conf.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypeSCRAMSHA512)
+			} else if Config.saslMechanism == "cram-sha256" {
+				conf.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &XDGSCRAMClient{HashGeneratorFcn: SHA256} }
+				conf.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypeSCRAMSHA256)
+			} else {
+				log.Printf("invalid SASL mechanism \"%s\": can be either \"cram-sha256\" or \"cram-sha512\"\n", Config.saslMechanism)
+				os.Exit(1)
+			}
+			conf.Net.SASL.User = Config.saslUsername
+			conf.Net.SASL.Password = Config.saslPassword
 		}
 
 		client, err := sarama.NewClient(Config.brokers, conf)
